@@ -1,21 +1,40 @@
-#include <Wire.h>
-const int MPU = 0x68; // MPU6050 I2C address
-float AccX, AccY, AccZ;
-float GyroX, GyroY, GyroZ;
-float accAngleX, accAngleY, gyroAngleX, gyroAngleY, gyroAngleZ;
-float roll, pitch, yaw;
+
+#include <Wire.h>           // Communication with MPU6050
+#include <LiquidCrystal.h>  // Operation of LCD
+const int BTN_PIN = 1;      // For mode button
+const int MPU = 0x68;       // MPU6050 I2C address
+float AccX, AccY, AccZ;     // Raw accelerometer data 
+float GyroX, GyroY, GyroZ;  // Raw gyroscope data
+float accAngleX, accAngleY; // Calculated accelerometer angles
+float gyroAngleX, gyroAngleY, gyroAngleZ;  // Calculated gyroscope angles
+float roll, pitch;
+unsigned long elapsedTime = 0;
+unsigned long currentTime = 0;
+unsigned long previousTime = 0;
+unsigned long devTime = 0;
+
+bool mode = true;           // true == sensing mode; false == pause mode
+bool bat = true;            // true == battery high; false == battery low, must switch
 float AccErrorX, AccErrorY, GyroErrorX, GyroErrorY, GyroErrorZ;
-float elapsedTime, currentTime, previousTime;
-float cal_roll, cal_pitch, cal_yaw;
-float roll, pitch, yaw;
 int c = 0;
-int cal_count = 0;
+float roll_bound = 1.0;
+float pitch_bound = 1.0;
 
 
+float cal_roll = 0.0;
+float cal_pitch = 0.0;
+float offset_roll = 0.0;
+float offset_pitch = 0.0;
 
+// initialize the library by associating any needed LCD interface pin
+// with the arduino pin number it is connected to
+const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
 void setup() {
   Serial.begin(19200);
+  pinMode(BTN_PIN, INPUT);           // Initialize mode button
+  
   Wire.begin();                      // Initialize comunication
   Wire.beginTransmission(MPU);       // Start communication with MPU6050 // MPU=0x68
   Wire.write(0x6B);                  // Talk to the register 6B
@@ -36,8 +55,10 @@ void setup() {
   */
   // Call this function if you need to get the IMU error values for your module
   calculate_IMU_error();
-  
-  calibrate();
+
+
+  // set up the LCD's number of columns and rows:
+  lcd.begin(16, 2);
   
   delay(20);
 }
@@ -47,14 +68,20 @@ void setup() {
 
 
 void loop() {
-  roll, pitch, yaw = read_acc()
+  checkMode();  
+  LCD();    
+  if(mode == false){  
+    goto bailout;
+  }
+  // sensing
+  bailout:
+  delay(10);
   
   // Print the values on the serial monitor
   Serial.print(roll);
   Serial.print("/");
   Serial.print(pitch);
-  Serial.print("/");
-  Serial.println(yaw);
+
 }
 void calculate_IMU_error() {
   // We can call this funtion in the setup section to calculate the accelerometer and gyro data error. From here we will get the error values used in the above equations printed on the Serial Monitor.
@@ -108,9 +135,8 @@ void calculate_IMU_error() {
   Serial.print("GyroErrorZ: ");
   Serial.println(GyroErrorZ);
 }
-
-void read_acc() {
-    // === Read acceleromter data === //
+void read_acc(){
+  // === Read acceleromter data === //
   Wire.beginTransmission(MPU);
   Wire.write(0x3B); // Start with register 0x3B (ACCEL_XOUT_H)
   Wire.endTransmission(false);
@@ -137,10 +163,11 @@ void read_acc() {
   GyroX = GyroX + 0.56; // GyroErrorX ~(-0.56)
   GyroY = GyroY - 2; // GyroErrorY ~(2)
   GyroZ = GyroZ + 0.79; // GyroErrorZ ~ (-0.8)
+  
   // Currently the raw values are in degrees per seconds, deg/s, so we need to multiply by sendonds (s) to get the angle in degrees
   gyroAngleX = gyroAngleX + GyroX * elapsedTime; // deg/s * s = deg
   gyroAngleY = gyroAngleY + GyroY * elapsedTime;
-  yaw =  yaw + GyroZ * elapsedTime;
+  
   // Complementary filter - combine acceleromter and gyro angle values
   gyroAngleX = 0.96 * gyroAngleX + 0.04 * accAngleX;
   gyroAngleY = 0.96 * gyroAngleY + 0.04 * accAngleY;
@@ -148,5 +175,128 @@ void read_acc() {
   roll = gyroAngleX;
   pitch = gyroAngleY;
   
-  return roll, pitch, yaw
+  //return roll, pitch;
+
+  
+}
+
+long sum(float arr[], int size_of_array) {
+  long sum = 0;
+  for (int i=0; i < size_of_array; i++) {
+      sum = sum + arr[i];
+  }
+
+  return sum;
+}
+
+float stan_dev(float arr[], float mean_arr,int size_of_array) {
+  float std1 = 0.0;
+  float sum_num=0.0;
+  float sub = 0.0;
+  float sq_sub = 0.0;
+  float alm_std = 0.0;
+  for (int i=0; i < size_of_array; i++) {
+      sub = arr[i] - mean_arr;
+      sq_sub = sq(sub);
+      sum_num += sq_sub;
+  }
+
+  alm_std = sum_num / size_of_array;
+  std1 = sqrt(alm_std);
+
+  return std1;
+
+}
+
+void calibrate() { 
+  int cal_count = 100; // Number of samples to take
+
+  // Create 3 lists to store readings
+  float roll_arr[cal_count];
+  float pitch_arr[cal_count];
+  //vecotr<float> yaw_vect [];
+  // Get readings from gyroscope
+  for (int i = 0; i < cal_count-1; i++) {      
+    read_acc();
+
+    roll_arr[i] = roll;
+    pitch_arr[i] = pitch;
+    //roll_vect.push_back(roll);
+    //pitch_vect.push_back(pitch);
+    //yaw_vect.push_back(yaw);
+
+    delay(100);
+  }
+
+  float sum_roll =  sum(roll_arr, cal_count);
+  float sum_pitch = sum(pitch_arr, cal_count);
+
+
+  // Take the average of all values after 5 seconds and Standard deviation
+  cal_roll = sum_roll / cal_count;
+  cal_pitch = sum_pitch / cal_count;
+  //cal_yaw = average(yaw_vect);
+  float flat = 5.0;
+  offset_roll  = stan_dev(roll_arr, cal_roll, cal_count) + flat;
+  offset_pitch = stan_dev(pitch_arr, cal_pitch, cal_count) + flat;
+
+  // Store averages and std's and return them
+  return cal_roll, cal_pitch, offset_roll, offset_pitch;
+}
+
+
+
+
+
+void compare(float roll, float pitch){
+  
+}
+
+
+
+void LCD(){
+  
+  //setCursor(column, row) indexed starting at 0
+  
+  lcd.setCursor(0, 0);    // sets cursor to first pixel of first line
+  if(mode){               // prints sense if mode is true
+    lcd.print("sense");
+  }
+  else{                   // prints pause if mode is false
+    lcd.print("pause");
+  }
+  lcd.setCursor(9,0);    // sets cursor to 10th pixel of the first line
+  if(bat){                // prints "BAT: HI" if bat is true
+    lcd.print("BAT: HI");
+  }
+  else{                   // prints "BAT: LO" if bat is false
+    lcd.print("BAT: LO");
+  }
+  lcd.setCursor(0,1);     // sets cursor to the first pixel of the second line
+  lcd.print("time: ");
+  lcd.print(devTime);
+}
+
+
+
+void checkBat(){
+  int sensorValue = analogRead(A0);
+  float voltage = sensorValue * (9.0/1023.0);
+
+  if (voltage <=7.4){
+    bat = false;
+  }
+  else{
+    bat = true;
+  }
+}
+
+void checkMode(){
+  uint8_t state = digitalRead(BTN_PIN);
+  if(state = HIGH){     //HIGH == sense
+    mode = true;
+  }
+  else{
+    mode = false;      //LOW == pause
+  }
 }
