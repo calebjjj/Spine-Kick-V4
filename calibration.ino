@@ -1,7 +1,7 @@
 #include <numeric>
 #include <vector>
 
-double average(vecotr<float> const& v) {
+double average(vector<float> const& v) {
   if(v.empty()) {
     return 0;
   }
