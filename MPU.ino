@@ -71,7 +71,7 @@ void setup() {
   lcd.begin(16, 2);
 
   // finds calibrated values
-  calibrate;
+  calibrate();
   delay(20);
 }
 
@@ -213,8 +213,8 @@ void read_acc(){
 }
 
 // returns the sum of values in an array
-long sum(float arr[], int size_of_array) {
-  long sum = 0;
+float sum(float arr[], int size_of_array) {
+  float sum = 0;
   for (int i=0; i < size_of_array; i++) {
       sum = sum + arr[i];
   }
