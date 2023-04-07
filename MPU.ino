@@ -88,7 +88,8 @@ void loop() {
   if(mode == false){          // if on pause mode, skips to bailout
     goto bailout;
   }
- 
+  
+  read_acc();
   compare();                   // checks the position state of the user
   // if true, user is deviating from standard posure and the haptic motor will turn on
   if(dev){
